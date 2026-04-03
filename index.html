@@ -1,0 +1,936 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>PC Health Monitor</title>
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   TOKENS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+:root {
+  --bg:           #f0f4f8;
+  --surface:      #ffffff;
+  --surface2:     #f8fafc;
+  --border:       #e2e8f0;
+  --shadow:       0 2px 12px rgba(0,0,0,0.07);
+  --shadow-lg:    0 8px 32px rgba(0,0,0,0.10);
+  --green:        #22c55e;
+  --green-bg:     #f0fdf4;
+  --green-border: #bbf7d0;
+  --amber:        #f59e0b;
+  --amber-bg:     #fffbeb;
+  --amber-border: #fde68a;
+  --red:          #ef4444;
+  --red-bg:       #fef2f2;
+  --red-border:   #fecaca;
+  --blue:         #3b82f6;
+  --blue-bg:      #eff6ff;
+  --text:         #1e293b;
+  --text-soft:    #64748b;
+  --text-light:   #94a3b8;
+  --heading:      'Nunito', sans-serif;
+  --body:         'Inter', sans-serif;
+  --radius:       16px;
+  --radius-sm:    10px;
+}
+
+*,*::before,*::after { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: var(--bg); font-family: var(--body); color: var(--text); min-height: 100vh; line-height: 1.5; }
+a { color: var(--blue); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* ━━ ALERT BANNER ━━━━━━━━━━━━━━━━━━━━━━━━ */
+#alert-banner {
+  display: none; position: fixed; top: 0; left: 0; right: 0; z-index: 999;
+  background: #7f1d1d; color: #fff; padding: 0 24px;
+  animation: slideDown 0.4s cubic-bezier(0.16,1,0.3,1);
+  box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+}
+@keyframes slideDown { from{transform:translateY(-100%)} to{transform:translateY(0)} }
+.banner-inner {
+  max-width: 900px; margin: 0 auto;
+  display: flex; align-items: center; gap: 16px; padding: 14px 0; flex-wrap: wrap;
+}
+.banner-icon { font-size: 26px; flex-shrink: 0; animation: shake 0.5s ease infinite alternate; }
+@keyframes shake { from{transform:rotate(-10deg)} to{transform:rotate(10deg)} }
+.banner-text { flex: 1; min-width: 180px; }
+.banner-title { font-family: var(--heading); font-weight: 800; font-size: 15px; margin-bottom: 2px; }
+.banner-body  { font-size: 13px; opacity: 0.9; }
+.banner-dismiss {
+  background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.3);
+  color: #fff; padding: 6px 16px; border-radius: 20px;
+  font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; transition: background 0.2s; font-family: var(--body);
+}
+.banner-dismiss:hover { background: rgba(255,255,255,0.3); }
+
+/* ━━ TOAST ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+#toast-container {
+  position: fixed; bottom: 24px; right: 24px; z-index: 2000;
+  display: flex; flex-direction: column; gap: 10px; pointer-events: none;
+}
+.toast {
+  background: var(--surface); border: 1px solid var(--border);
+  border-left: 4px solid var(--blue); border-radius: var(--radius-sm);
+  padding: 12px 16px; min-width: 240px; max-width: 300px;
+  pointer-events: all; box-shadow: var(--shadow-lg);
+  animation: toastIn 0.35s cubic-bezier(0.16,1,0.3,1); cursor: pointer;
+}
+.toast.t-warn { border-left-color: var(--amber); }
+.toast.t-high { border-left-color: var(--red); }
+@keyframes toastIn  { from{transform:translateX(110%);opacity:0} to{transform:translateX(0);opacity:1} }
+@keyframes toastOut { to{transform:translateX(110%);opacity:0} }
+.toast-out { animation: toastOut 0.3s ease forwards; }
+.toast-title { font-family: var(--heading); font-weight: 700; font-size: 13px; margin-bottom: 2px; }
+.toast-msg   { font-size: 12px; color: var(--text-soft); }
+
+/* ━━ NAV ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+header {
+  background: var(--surface); border-bottom: 1px solid var(--border);
+  padding: 0 24px; position: sticky; top: 0; z-index: 100;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+}
+.nav-inner {
+  max-width: 900px; margin: 0 auto;
+  display: flex; align-items: center; justify-content: space-between; height: 60px; gap: 12px;
+}
+.logo { display: flex; align-items: center; gap: 10px; }
+.logo-icon {
+  width: 36px; height: 36px;
+  background: linear-gradient(135deg,#3b82f6,#6366f1);
+  border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 18px;
+}
+.logo-name { font-family: var(--heading); font-weight: 800; font-size: 18px; }
+.logo-name span { color: var(--blue); }
+.nav-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.conn-chip {
+  display: flex; align-items: center; gap: 6px;
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: 20px; padding: 4px 12px; font-size: 12px; font-weight: 600; color: var(--text-soft);
+}
+.conn-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-light); }
+.conn-dot.live  { background: var(--green); box-shadow: 0 0 0 2px #bbf7d0; animation: livePulse 2s infinite; }
+.conn-dot.error { background: var(--red); }
+@keyframes livePulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
+.notif-btn {
+  display: none; align-items: center; gap: 6px;
+  background: var(--amber-bg); border: 1px solid var(--amber-border);
+  color: #92400e; font-size: 12px; font-weight: 700; padding: 6px 14px;
+  border-radius: 20px; cursor: pointer; transition: all 0.2s; font-family: var(--body);
+}
+.notif-btn:hover { background: #fde68a; }
+#last-update { font-size: 11px; color: var(--text-light); white-space: nowrap; }
+
+/* ━━ LAYOUT ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+.page { max-width: 900px; margin: 0 auto; padding: 32px 24px 80px; }
+
+/* ━━ HERO ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+.hero {
+  background: var(--surface); border-radius: 24px; padding: 40px 32px;
+  text-align: center; box-shadow: var(--shadow); margin-bottom: 24px;
+  border: 2px solid var(--border); transition: border-color 0.4s, box-shadow 0.4s;
+  position: relative; overflow: hidden;
+}
+.hero::before {
+  content: ''; position: absolute; inset: 0;
+  background: radial-gradient(circle at 50% 0%, var(--glow, transparent) 0%, transparent 65%);
+  pointer-events: none;
+}
+.hero.s-good   { border-color: var(--green-border); --glow: rgba(34,197,94,0.10);  box-shadow: 0 4px 24px rgba(34,197,94,0.08); }
+.hero.s-warn   { border-color: var(--amber-border); --glow: rgba(245,158,11,0.10); box-shadow: 0 4px 24px rgba(245,158,11,0.08); }
+.hero.s-danger { border-color: var(--red-border);   --glow: rgba(239,68,68,0.12);  box-shadow: 0 4px 24px rgba(239,68,68,0.10); }
+.hero-emoji {
+  font-size: 72px; line-height: 1; margin-bottom: 16px; display: block; transition: all 0.4s;
+}
+.hero.s-danger .hero-emoji { animation: bounce 0.7s ease infinite alternate; }
+@keyframes bounce { from{transform:translateY(0)} to{transform:translateY(-10px)} }
+.hero-status {
+  font-family: var(--heading); font-weight: 900; font-size: 30px; margin-bottom: 10px; transition: color 0.4s;
+}
+.hero.s-good   .hero-status { color: #15803d; }
+.hero.s-warn   .hero-status { color: #b45309; }
+.hero.s-danger .hero-status { color: #b91c1c; }
+.hero-desc { font-size: 15px; color: var(--text-soft); max-width: 480px; margin: 0 auto 24px; line-height: 1.65; }
+.hero-badge {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 8px 20px; border-radius: 24px; font-size: 13px; font-weight: 700;
+}
+.hero.s-good   .hero-badge { background: var(--green-bg); color: #166534; }
+.hero.s-warn   .hero-badge { background: var(--amber-bg); color: #92400e; }
+.hero.s-danger .hero-badge { background: var(--red-bg);   color: #991b1b; }
+.hero-badge-dot { width: 8px; height: 8px; border-radius: 50%; animation: livePulse 1.5s infinite; }
+.hero.s-good   .hero-badge-dot { background: var(--green); }
+.hero.s-warn   .hero-badge-dot { background: var(--amber); }
+.hero.s-danger .hero-badge-dot { background: var(--red); }
+
+/* ━━ ACTION CARD ━━━━━━━━━━━━━━━━━━━━━━━━━ */
+#action-card {
+  display: none; background: var(--red-bg); border: 1.5px solid var(--red-border);
+  border-radius: var(--radius); padding: 24px 28px; margin-bottom: 24px;
+}
+#action-card.visible { display: block; }
+.action-title {
+  font-family: var(--heading); font-weight: 800; font-size: 17px; color: #991b1b;
+  margin-bottom: 16px; display: flex; align-items: center; gap: 8px;
+}
+.steps-list { list-style: none; display: flex; flex-direction: column; gap: 12px; }
+.step { display: flex; align-items: flex-start; gap: 14px; }
+.step-num {
+  width: 28px; height: 28px; border-radius: 50%; background: var(--red); color: #fff;
+  font-weight: 800; font-size: 13px; display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0; margin-top: 1px;
+}
+.step-text { font-size: 14px; color: #7f1d1d; line-height: 1.55; }
+.step-text strong { font-weight: 700; color: #991b1b; }
+
+/* ━━ SENSOR CARDS ━━━━━━━━━━━━━━━━━━━━━━━━ */
+.cards-row { display: grid; grid-template-columns: repeat(3,1fr); gap: 16px; margin-bottom: 24px; }
+.scard {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 20px; box-shadow: var(--shadow);
+}
+.scard-icon { font-size: 28px; margin-bottom: 8px; }
+.scard-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-light); margin-bottom: 4px; }
+.scard-val {
+  font-family: var(--heading); font-weight: 800; font-size: 30px; color: var(--text); transition: all 0.3s;
+}
+.scard-val.flash { animation: valFlash 0.35s ease; }
+@keyframes valFlash { 0%{opacity:0.4;transform:scale(0.94)} 100%{opacity:1;transform:scale(1)} }
+.scard-unit { font-size: 12px; color: var(--text-soft); margin-top: 2px; }
+.scard-hint { font-size: 11px; color: var(--text-light); margin-top: 6px; padding: 5px 8px; background: var(--surface2); border-radius: 6px; }
+
+/* ━━ GUIDE CARDS ━━━━━━━━━━━━━━━━━━━━━━━━━ */
+.guide-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 14px; margin-bottom: 28px; }
+.gcard { border-radius: var(--radius); padding: 20px; border: 1.5px solid; }
+.gcard.g-good   { background: var(--green-bg); border-color: var(--green-border); }
+.gcard.g-warn   { background: var(--amber-bg); border-color: var(--amber-border); }
+.gcard.g-danger { background: var(--red-bg);   border-color: var(--red-border); }
+.gcard-emoji { font-size: 30px; margin-bottom: 10px; }
+.gcard-level { font-family: var(--heading); font-weight: 800; font-size: 15px; margin-bottom: 6px; }
+.g-good   .gcard-level { color: #166534; }
+.g-warn   .gcard-level { color: #92400e; }
+.g-danger .gcard-level { color: #991b1b; }
+.gcard-desc { font-size: 12px; line-height: 1.55; }
+.g-good   .gcard-desc { color: #166534; opacity: 0.8; }
+.g-warn   .gcard-desc { color: #92400e; opacity: 0.8; }
+.g-danger .gcard-desc { color: #7f1d1d; opacity: 0.85; }
+
+/* ━━ PANEL ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+.panel {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 24px; box-shadow: var(--shadow); margin-bottom: 24px;
+}
+.panel-head { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 18px; gap: 12px; flex-wrap: wrap; }
+.panel-title { font-family: var(--heading); font-weight: 800; font-size: 16px; color: var(--text); }
+.panel-sub   { font-size: 12px; color: var(--text-light); margin-top: 2px; }
+.panel-count { font-size: 12px; color: var(--text-light); white-space: nowrap; }
+.chart-box { position: relative; height: 200px; }
+
+/* ━━ TABLE ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+.tbl-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th {
+  text-align: left; padding: 8px 14px; color: var(--text-soft);
+  font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em;
+  border-bottom: 1px solid var(--border); white-space: nowrap; background: var(--surface2);
+}
+td { padding: 10px 14px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+tr:last-child td { border-bottom: none; }
+tr:hover td { background: var(--surface2); }
+.pill { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 700; }
+.p-low    { background: var(--green-bg); color: #166534; }
+.p-medium { background: var(--amber-bg); color: #92400e; }
+.p-high   { background: var(--red-bg);   color: #991b1b; }
+.p-wait   { background: #f1f5f9; color: var(--text-light); }
+
+/* ━━ SECTION TITLE ━━━━━━━━━━━━━━━━━━━━━━━ */
+.section-title {
+  font-family: var(--heading); font-weight: 800; font-size: 20px;
+  color: var(--text); margin-bottom: 16px; display: flex; align-items: center; gap: 8px;
+}
+
+/* ━━ DEPLOY SECTION ━━━━━━━━━━━━━━━━━━━━━━ */
+.deploy-section { margin-top: 48px; padding-top: 32px; border-top: 2px dashed var(--border); }
+.deploy-intro {
+  background: var(--blue-bg); border: 1.5px solid #bfdbfe;
+  border-radius: var(--radius); padding: 20px 24px; margin-bottom: 28px;
+  font-size: 14px; color: #1e40af; line-height: 1.65;
+}
+.deploy-intro strong { font-weight: 700; }
+.deploy-tabs { display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap; }
+.dtab {
+  padding: 8px 18px; border-radius: 20px; font-size: 13px; font-weight: 700;
+  border: 2px solid var(--border); background: var(--surface); color: var(--text-soft);
+  cursor: pointer; transition: all 0.2s; font-family: var(--body);
+}
+.dtab.active { background: var(--blue); border-color: var(--blue); color: #fff; }
+.dtab:hover:not(.active) { border-color: var(--blue); color: var(--blue); }
+.deploy-panel { display: none; }
+.deploy-panel.active { display: block; }
+.deploy-steps { display: flex; flex-direction: column; gap: 14px; }
+.dstep {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 20px 22px; display: flex; gap: 18px; align-items: flex-start;
+  box-shadow: var(--shadow); transition: box-shadow 0.2s;
+}
+.dstep:hover { box-shadow: var(--shadow-lg); }
+.dstep-num {
+  width: 36px; height: 36px; border-radius: 50%; background: var(--blue); color: #fff;
+  font-family: var(--heading); font-weight: 900; font-size: 16px;
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.dstep-body { flex: 1; }
+.dstep-title { font-family: var(--heading); font-weight: 800; font-size: 15px; color: var(--text); margin-bottom: 6px; }
+.dstep-desc  { font-size: 13px; color: var(--text-soft); line-height: 1.6; }
+.dstep-desc strong { color: var(--text); font-weight: 600; }
+.code-block {
+  background: #1e293b; color: #e2e8f0; border-radius: 8px; padding: 12px 16px;
+  font-family: 'Courier New', monospace; font-size: 12px; line-height: 1.7;
+  margin-top: 10px; overflow-x: auto; white-space: pre;
+}
+.cc { color: #64748b; } /* comment */
+.ck { color: #86efac; } /* command/keyword */
+.cv { color: #fbbf24; } /* value */
+.dstep-tip {
+  font-size: 12px; color: var(--text-soft); margin-top: 8px;
+  padding: 8px 12px; background: var(--surface2); border-radius: 8px;
+  border-left: 3px solid #bfdbfe;
+}
+
+/* ━━ RESPONSIVE ━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+@media (max-width: 640px) {
+  .cards-row, .guide-grid { grid-template-columns: 1fr 1fr; }
+  .hero { padding: 28px 20px; }
+  .hero-emoji { font-size: 56px; }
+  .hero-status { font-size: 24px; }
+  .page { padding: 20px 16px 60px; }
+  header { padding: 0 16px; }
+}
+@media (max-width: 420px) {
+  .cards-row, .guide-grid { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+
+<!-- ALERT BANNER -->
+<div id="alert-banner">
+  <div class="banner-inner">
+    <div class="banner-icon">🚨</div>
+    <div class="banner-text">
+      <div class="banner-title">Your PC needs cleaning right now!</div>
+      <div class="banner-body">Dust levels are dangerously high. Turn off your PC and clean it to avoid overheating.</div>
+    </div>
+    <button class="banner-dismiss" onclick="dismissBanner()">Got it ✕</button>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div id="toast-container"></div>
+
+<!-- HEADER -->
+<header>
+  <div class="nav-inner">
+    <div class="logo">
+      <div class="logo-icon">💻</div>
+      <div class="logo-name">PC <span>Health</span></div>
+    </div>
+    <div class="nav-right">
+      <button class="notif-btn" id="notif-btn" onclick="requestNotifPermission()">🔔 Get Alerts</button>
+      <div class="conn-chip"><div class="conn-dot" id="api-dot"></div><span id="api-label">AI</span></div>
+      <div class="conn-chip"><div class="conn-dot" id="conn-dot"></div><span id="conn-label">Connecting…</span></div>
+      <div id="last-update"></div>
+    </div>
+  </div>
+</header>
+
+<div class="page">
+
+  <!-- HERO -->
+  <div class="hero" id="hero">
+    <span class="hero-emoji" id="hero-emoji">⏳</span>
+    <div class="hero-status" id="hero-status">Checking your PC…</div>
+    <p class="hero-desc" id="hero-desc">We're reading the sensor. This only takes a few seconds — hang tight!</p>
+    <div class="hero-badge" id="hero-badge">
+      <div class="hero-badge-dot"></div>
+      <span id="hero-badge-text">Starting up</span>
+    </div>
+  </div>
+
+  <!-- ACTION CARD -->
+  <div id="action-card">
+    <div class="action-title">🛠️ What should I do right now?</div>
+    <ul class="steps-list">
+      <li class="step"><div class="step-num">1</div><div class="step-text"><strong>Turn off your PC</strong> and unplug it from the wall — safety first!</div></li>
+      <li class="step"><div class="step-num">2</div><div class="step-text"><strong>Open the side panel</strong> of your desktop, or find the air vents on your laptop.</div></li>
+      <li class="step"><div class="step-num">3</div><div class="step-text"><strong>Use a can of compressed air</strong> to blow out dust from the fans, vents, and heatsinks. Hold the can about 10 cm away.</div></li>
+      <li class="step"><div class="step-num">4</div><div class="step-text"><strong>Wipe down the vents</strong> with a dry cloth to remove any leftover dust from the surface.</div></li>
+      <li class="step"><div class="step-num">5</div><div class="step-text"><strong>Plug it back in and power on.</strong> Check this page again — the reading should drop within a few minutes.</div></li>
+    </ul>
+  </div>
+
+  <!-- SENSOR CARDS -->
+  <div class="cards-row">
+    <div class="scard">
+      <div class="scard-icon">🌡️</div>
+      <div class="scard-label">Room Temperature</div>
+      <div class="scard-val" id="v-temp">—</div>
+      <div class="scard-unit">°C</div>
+      <div class="scard-hint">💡 Ideal: 18–30°C</div>
+    </div>
+    <div class="scard">
+      <div class="scard-icon">💧</div>
+      <div class="scard-label">Air Humidity</div>
+      <div class="scard-val" id="v-hum">—</div>
+      <div class="scard-unit">%</div>
+      <div class="scard-hint">💡 Ideal: 30–60%</div>
+    </div>
+    <div class="scard">
+      <div class="scard-icon">🌫️</div>
+      <div class="scard-label">Dust in Air</div>
+      <div class="scard-val" id="v-dust">—</div>
+      <div class="scard-unit">mg/m³</div>
+      <div class="scard-hint">💡 Lower is better</div>
+    </div>
+  </div>
+
+  <!-- GUIDE -->
+  <div class="section-title">📖 What does each status mean?</div>
+  <div class="guide-grid">
+    <div class="gcard g-good">
+      <div class="gcard-emoji">✅</div>
+      <div class="gcard-level">All Good!</div>
+      <div class="gcard-desc">Dust levels are low. Your PC is breathing clean air and running cool. No action needed.</div>
+    </div>
+    <div class="gcard g-warn">
+      <div class="gcard-emoji">⚠️</div>
+      <div class="gcard-level">Getting Dusty</div>
+      <div class="gcard-desc">Dust is building up. Not urgent yet — but plan to clean your PC sometime soon.</div>
+    </div>
+    <div class="gcard g-danger">
+      <div class="gcard-emoji">🚨</div>
+      <div class="gcard-level">Needs Cleaning!</div>
+      <div class="gcard-desc">Too much dust. Your PC may overheat or slow down. Clean it as soon as possible.</div>
+    </div>
+  </div>
+
+  <!-- DUST CHART -->
+  <div class="panel">
+    <div class="panel-head">
+      <div>
+        <div class="panel-title">🌫️ Dust Level Over Time</div>
+        <div class="panel-sub">How clean the air around your PC has been recently</div>
+      </div>
+      <div class="panel-count" id="reading-count">0 readings</div>
+    </div>
+    <div class="chart-box"><canvas id="dustChart"></canvas></div>
+  </div>
+
+  <!-- ENV CHART -->
+  <div class="panel">
+    <div class="panel-head">
+      <div>
+        <div class="panel-title">🌡️ Temperature &amp; Humidity</div>
+        <div class="panel-sub">Room conditions around your PC</div>
+      </div>
+    </div>
+    <div class="chart-box"><canvas id="envChart"></canvas></div>
+  </div>
+
+  <!-- HISTORY TABLE -->
+  <div class="panel">
+    <div class="panel-head">
+      <div>
+        <div class="panel-title">📋 Recent Readings</div>
+        <div class="panel-sub">The last 15 sensor updates from your device</div>
+      </div>
+    </div>
+    <div class="tbl-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Dust in Air</th>
+            <th>Temperature</th>
+            <th>Humidity</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="hist-tbody">
+          <tr><td colspan="5" style="color:var(--text-light);text-align:center;padding:28px 14px">Waiting for first reading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════
+       DEPLOY GUIDE
+  ═══════════════════════════════════════ -->
+  <div class="deploy-section">
+    <div class="section-title">🚀 How to Put This Website Online</div>
+    <div class="deploy-intro">
+      Right now this page only works on your own computer. Follow the steps below to make it available from <strong>anywhere</strong> — your phone, a friend's browser, or share the link with others. Pick whichever guide looks easiest to you!
+    </div>
+
+    <div class="deploy-tabs">
+      <button class="dtab active" onclick="showTab(event,'netlify')">⚡ Netlify <small style="opacity:0.7">(Easiest)</small></button>
+      <button class="dtab" onclick="showTab(event,'github')">🐙 GitHub Pages <small style="opacity:0.7">(Free)</small></button>
+      <button class="dtab" onclick="showTab(event,'render')">🖥️ Render <small style="opacity:0.7">(Backend AI)</small></button>
+    </div>
+
+    <!-- ── NETLIFY ── -->
+    <div class="deploy-panel active" id="tab-netlify">
+      <div class="deploy-steps">
+
+        <div class="dstep">
+          <div class="dstep-num">1</div>
+          <div class="dstep-body">
+            <div class="dstep-title">Go to Netlify Drop</div>
+            <div class="dstep-desc">Open <a href="https://netlify.com/drop" target="_blank">netlify.com/drop</a> in your browser. You don't need to create an account yet.</div>
+          </div>
+        </div>
+
+        <div class="dstep">
+          <div class="dstep-num">2</div>
+          <div class="dstep-body">
+            <div class="dstep-title">Drag and drop your HTML file</div>
+            <div class="dstep-desc">Find your <strong>dust_monitor.html</strong> file on your computer (probably in your Downloads folder), then <strong>drag it and drop it</strong> onto the big dashed box on the Netlify page. Netlify uploads it automatically — no clicking needed.</div>
+            <div class="dstep-tip">💡 You can also click the box and browse for the file if drag-and-drop doesn't work.</div>
+          </div>
+        </div>
+
+        <div class="dstep">
+          <div class="dstep-num">3</div>
+          <div class="dstep-body">
+            <div class="dstep-title">Your site is live! Copy the link.</div>
+            <div class="dstep-desc">Netlify gives you a random link like <strong>https://brave-fox-12345.netlify.app</strong>. Open it on your phone to test it! Share it with anyone you want to show your monitor to.</div>
+          </div>
+        </div>
+
+        <div class="dstep">
+          <div class="dstep-num">4</div>
+          <div class="dstep-body">
+            <div class="dstep-title">(Optional) Make it permanent with a free account</div>
+            <div class="dstep-desc">Without logging in, your site may disappear after some time. Sign up for a free Netlify account, then click <strong>"Claim your site"</strong> to keep it forever and optionally change the URL to something nicer.</div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ── GITHUB PAGES ── -->
+    <div class="deploy-panel" id="tab-github">
+      <div class="deploy-steps">
+
+        <div class="dstep">
+          <div class="dstep-num">1</div>
+          <div class="dstep-body">
+            <div class="dstep-title">Create a free GitHub account</div>
+            <div class="dstep-desc">Go to <a href="https://github.com/join" target="_blank">github.com/join</a> and sign up. It takes about 2 minutes and it's completely free.</div>
+          </div>
+        </div>
+
+        <div class="dstep">
+          <div class="dstep-num">2</div>
+          <div class="dstep-body">
+            <div class="dstep-title">Create a new repository</div>
+            <div class="dstep-desc">After logging in, click the <strong>green "New" button</strong> on your dashboard. Name it something like <strong>pc-health-monitor</strong>. Set it to <strong>Public</strong>, then click <strong>"Create repository"</strong>.</div>
+          </div>
+        </div>
+
+        <div class="dstep">
+          <div class="dstep-num">3</div>
+          <div class="dstep-body">
+            <div class="dstep-title">Upload your file — renamed to index.html</div>
+            <div class="dstep-desc">Click <strong>"uploading an existing file"</strong>. Drag your <strong>dust_monitor.html</strong> file in. <strong>Before saving, rename the file to index.html</strong> — this is required for GitHub Pages to find your site. Then click <strong>"Commit changes"</strong>.</div>
+            <div class="dstep-tip">⚠️ The file <strong>must</strong> be named <strong>index.html</strong> — GitHub Pages won't work with a different name.</div>
+          </div>
+        </div>
+
+        <div class="dstep">
+          <div class="dstep-num">4</div>
+          <div class="dstep-body">
+            <div class="dstep-title">Enable GitHub Pages</div>
+            <div class="dstep-desc">Go to your repository → click <strong>Settings</strong> at the top → scroll down to <strong>Pages</strong> on the left sidebar → under "Source", select <strong>"Deploy from a branch"</strong> → choose <strong>main</strong> → click <strong>Save</strong>.</div>
+          </div>
+        </div>
+
+        <div class="dstep">
+          <div class="dstep-num">5</div>
+          <div class="dstep-body">
+            <div class="dstep-title">Wait 1–2 minutes, then open your site</div>
+            <div class="dstep-desc">Your site will be live at:<br><strong>https://YOUR-USERNAME.github.io/pc-health-monitor</strong><br>Replace <em>YOUR-USERNAME</em> with your actual GitHub username.</div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ── RENDER ── -->
+    <div class="deploy-panel" id="tab-render">
+      <div class="deploy-steps">
+
+        <div class="dstep">
+          <div class="dstep-num">1</div>
+          <div class="dstep-body">
+            <div class="dstep-title">Upload your backend folder to GitHub</div>
+            <div class="dstep-desc">Create a new GitHub repo (see the GitHub Pages guide if needed), then upload the entire <strong>backend/</strong> folder. Make sure it contains: <strong>app.py</strong>, <strong>requirements.txt</strong>, <strong>Procfile</strong>, and the <strong>models/</strong> folder with all 4 .pkl files inside.</div>
+          </div>
+        </div>
+
+        <div class="dstep">
+          <div class="dstep-num">2</div>
+          <div class="dstep-body">
+            <div class="dstep-title">Sign up for Render (free)</div>
+            <div class="dstep-desc">Go to <a href="https://render.com" target="_blank">render.com</a> and create a free account using your GitHub login — this makes connecting your code much easier.</div>
+          </div>
+        </div>
+
+        <div class="dstep">
+          <div class="dstep-num">3</div>
+          <div class="dstep-body">
+            <div class="dstep-title">Create a New Web Service</div>
+            <div class="dstep-desc">In your Render dashboard, click <strong>New → Web Service</strong>. Connect your GitHub account and select the repository where you uploaded your backend folder. Render will detect your files automatically.</div>
+          </div>
+        </div>
+
+        <div class="dstep">
+          <div class="dstep-num">4</div>
+          <div class="dstep-body">
+            <div class="dstep-title">Set the two commands Render needs</div>
+            <div class="dstep-desc">Fill in these fields exactly as shown — copy and paste to avoid typos:</div>
+            <div class="code-block"><span class="cc"># Build Command (installs the Python packages)</span>
+<span class="ck">pip install -r requirements.txt</span>
+
+<span class="cc"># Start Command (starts the AI server)</span>
+<span class="ck">gunicorn app:app</span></div>
+            <div class="dstep-tip">💡 Choose the free "Starter" plan — it's more than enough for your sensor data.</div>
+          </div>
+        </div>
+
+        <div class="dstep">
+          <div class="dstep-num">5</div>
+          <div class="dstep-body">
+            <div class="dstep-title">Copy your new URL into this website</div>
+            <div class="dstep-desc">Once deployed (takes ~3 minutes), Render gives you a link like <strong>https://mor-api.onrender.com</strong>. Open your <strong>dust_monitor.html</strong> in a text editor (like Notepad), find this line, and replace it:</div>
+            <div class="code-block"><span class="cc">// Find this line near the top of the &lt;script&gt; section:</span>
+<span class="cv">const BACKEND_URL = 'http://localhost:5000';</span>
+
+<span class="cc">// Replace it with your Render URL:</span>
+<span class="cv">const BACKEND_URL = 'https://mor-api.onrender.com';</span></div>
+            <div class="dstep-tip">💡 After saving this change, re-upload the HTML file to Netlify or GitHub Pages to go fully live.</div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+  </div><!-- /deploy-section -->
+
+</div><!-- /page -->
+
+<script>
+/* ── TAB SWITCHER ─────────────────────────── */
+function showTab(e, id) {
+  document.querySelectorAll('.deploy-panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.dtab').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-' + id).classList.add('active');
+  e.currentTarget.classList.add('active');
+}
+
+/* ── CONFIG ───────────────────────────────── */
+const FB_URL      = 'https://mor-backend-781ab-default-rtdb.asia-southeast1.firebasedatabase.app';
+const FB_AUTH     = 'dHg0TauW07ihA0pzCRhQwrouvRhz4ZdO3mRiecJG';
+const BACKEND_URL = 'https://dust-detection-project.onrender.com/'; // ← change to Render URL after deploying
+
+/* ── ROLLING WINDOW ───────────────────────── */
+const WINDOW_SIZE = 5;
+const dustBuf = [], tempBuf = [];
+function updateBuffers(d, t) {
+  dustBuf.push(d); tempBuf.push(t);
+  if (dustBuf.length > WINDOW_SIZE) dustBuf.shift();
+  if (tempBuf.length > WINDOW_SIZE) tempBuf.shift();
+}
+
+/* ── ML PREDICT ───────────────────────────── */
+async function mlPredict(dust, temp) {
+  updateBuffers(dust, temp);
+  if (dustBuf.length < WINDOW_SIZE) return 'Collecting data...';
+  try {
+    const res = await fetch(`${BACKEND_URL}/predict`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dust_window: [...dustBuf], temp_window: [...tempBuf] })
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    return (await res.json()).label || 'Collecting data...';
+  } catch (e) {
+    console.warn('Backend offline:', e.message);
+    return 'Backend offline';
+  }
+}
+
+/* ── HERO STATES ──────────────────────────── */
+const STATES = {
+  good:    { emoji:'✅', status:'Your PC is Clean!',         desc:'The air around your PC looks great. No action needed — enjoy your clean, cool machine!',                                 badge:'All Good',            cls:'s-good' },
+  warn:    { emoji:'⚠️', status:'Getting a Bit Dusty',       desc:'Dust is starting to build up. It\'s not urgent yet, but plan to clean your PC sometime soon to keep it running smoothly.', badge:'Moderate Dust',       cls:'s-warn' },
+  danger:  { emoji:'🚨', status:'Your PC Needs Cleaning!',   desc:'Too much dust detected. Your PC could overheat or slow down. Please clean it as soon as you can — scroll down for easy steps!', badge:'High Dust — Act Now', cls:'s-danger' },
+  waiting: { emoji:'⏳', status:'Warming Up…',               desc:'The sensor is collecting its first few readings. Your status will appear shortly — hang tight!',                          badge:'Please wait',         cls:'' },
+  offline: { emoji:'📡', status:'Sensor Offline',            desc:'Can\'t reach your sensor. Make sure your ESP32 device is powered on and connected to Wi-Fi.',                              badge:'No connection',       cls:'' }
+};
+
+function setHero(state) {
+  const s = STATES[state] || STATES.waiting;
+  document.getElementById('hero').className    = 'hero ' + s.cls;
+  document.getElementById('hero-emoji').textContent    = s.emoji;
+  document.getElementById('hero-status').textContent   = s.status;
+  document.getElementById('hero-desc').textContent     = s.desc;
+  document.getElementById('hero-badge-text').textContent = s.badge;
+  document.getElementById('action-card').classList.toggle('visible', state === 'danger');
+}
+
+function labelToState(l) {
+  if (l === 'Low Dust')    return 'good';
+  if (l === 'Medium Dust') return 'warn';
+  if (l === 'High Dust')   return 'danger';
+  return 'waiting';
+}
+
+function labelToPill(l) {
+  if (l === 'Low Dust')    return '<span class="pill p-low">✅ All Good</span>';
+  if (l === 'Medium Dust') return '<span class="pill p-medium">⚠️ Getting Dusty</span>';
+  if (l === 'High Dust')   return '<span class="pill p-high">🚨 Needs Cleaning</span>';
+  return '<span class="pill p-wait">Checking…</span>';
+}
+
+/* ── CARD VALUES ──────────────────────────── */
+function setVal(id, val) {
+  const el = document.getElementById(id);
+  el.textContent = val;
+  el.classList.remove('flash');
+  void el.offsetWidth;
+  el.classList.add('flash');
+}
+
+function setFBStatus(ok) {
+  document.getElementById('conn-dot').className = 'conn-dot ' + (ok ? 'live' : 'error');
+  document.getElementById('conn-label').textContent = ok ? 'Sensor Live' : 'Sensor Offline';
+}
+
+/* ── CHARTS ───────────────────────────────── */
+const chartBase = {
+  animation: { duration: 300 }, responsive: true, maintainAspectRatio: false,
+  plugins: {
+    legend: { display: false },
+    tooltip: { backgroundColor: '#1e293b', cornerRadius: 8, padding: 10,
+               titleFont: { family: 'Nunito', weight: '700' }, bodyFont: { family: 'Inter' } }
+  },
+  scales: {
+    x: { ticks: { color: '#94a3b8', font: { family: 'Inter', size: 10 }, maxRotation: 0, maxTicksLimit: 7 }, grid: { color: '#f1f5f9' } },
+    y: { ticks: { color: '#94a3b8', font: { family: 'Inter', size: 10 } }, grid: { color: '#f1f5f9' } }
+  }
+};
+
+const dustChart = new Chart(document.getElementById('dustChart'), {
+  type: 'line',
+  data: { labels: [], datasets: [{
+    data: [], borderColor: '#ef4444', backgroundColor: 'rgba(239,68,68,0.07)',
+    borderWidth: 2, pointRadius: 3, pointBackgroundColor: '#ef4444', tension: 0.4, fill: true
+  }]},
+  options: { ...chartBase,
+    plugins: { ...chartBase.plugins, tooltip: { ...chartBase.plugins.tooltip,
+      callbacks: { label: c => ' Dust: ' + c.parsed.y.toFixed(4) + ' mg/m³' } } },
+    scales: { ...chartBase.scales, y: { ...chartBase.scales.y,
+      title: { display: true, text: 'Dust (mg/m³)', color: '#94a3b8', font: { size: 10 } } } }
+  }
+});
+
+const envChart = new Chart(document.getElementById('envChart'), {
+  type: 'line',
+  data: { labels: [], datasets: [
+    { label: 'Temp (°C)',     data: [], borderColor: '#f59e0b', backgroundColor: 'rgba(245,158,11,0.05)', borderWidth: 2, pointRadius: 2, tension: 0.4, fill: false, yAxisID: 'y' },
+    { label: 'Humidity (%)', data: [], borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,0.05)',  borderWidth: 2, pointRadius: 2, tension: 0.4, fill: false, yAxisID: 'y1' }
+  ]},
+  options: { ...chartBase,
+    plugins: { ...chartBase.plugins, legend: { display: true,
+      labels: { color: '#64748b', font: { family: 'Inter', size: 11 }, boxWidth: 12, usePointStyle: true } } },
+    scales: {
+      x:  chartBase.scales.x,
+      y:  { ...chartBase.scales.y, position: 'left',  title: { display: true, text: '°C', color: '#f59e0b', font: { size: 10 } } },
+      y1: { ...chartBase.scales.y, position: 'right', grid: { drawOnChartArea: false }, title: { display: true, text: '%', color: '#3b82f6', font: { size: 10 } } }
+    }
+  }
+});
+
+/* ── TABLE + CHARTS ───────────────────────── */
+const MAX_CHART = 30, histRows = [];
+
+function addToCharts(lbl, dust, temp, hum) {
+  [dustChart, envChart].forEach(c => {
+    c.data.labels.push(lbl);
+    if (c.data.labels.length > MAX_CHART) c.data.labels.shift();
+  });
+  dustChart.data.datasets[0].data.push(+dust.toFixed(5));
+  if (dustChart.data.datasets[0].data.length > MAX_CHART) dustChart.data.datasets[0].data.shift();
+  envChart.data.datasets[0].data.push(+temp.toFixed(1));
+  envChart.data.datasets[1].data.push(+hum.toFixed(1));
+  if (envChart.data.datasets[0].data.length > MAX_CHART) { envChart.data.datasets[0].data.shift(); envChart.data.datasets[1].data.shift(); }
+  dustChart.update('none'); envChart.update('none');
+  document.getElementById('reading-count').textContent = dustChart.data.labels.length + ' readings';
+}
+
+function addToTable(time, dust, temp, hum, label) {
+  histRows.unshift({ time, dust, temp, hum, label });
+  if (histRows.length > 15) histRows.pop();
+  document.getElementById('hist-tbody').innerHTML = histRows.map(r =>
+    `<tr><td>${r.time}</td><td>${r.dust.toFixed(4)} <small style="color:var(--text-light)">mg/m³</small></td><td>${r.temp.toFixed(1)} °C</td><td>${r.hum.toFixed(1)} %</td><td>${labelToPill(r.label)}</td></tr>`
+  ).join('');
+}
+
+/* ── NOTIFICATIONS ────────────────────────── */
+let lastNotifTime = 0, bannerDismissed = false, consecutiveHigh = 0;
+const NOTIF_COOLDOWN = 5 * 60 * 1000;
+
+function initNotifButton() {
+  if (!('Notification' in window)) return;
+  if (Notification.permission === 'default') document.getElementById('notif-btn').style.display = 'flex';
+}
+async function requestNotifPermission() {
+  if (!('Notification' in window)) return showToast('warn','Not Supported','Your browser doesn\'t support notifications.');
+  const p = await Notification.requestPermission();
+  if (p === 'granted') { document.getElementById('notif-btn').style.display = 'none'; showToast('ok','🔔 Alerts Enabled','You\'ll get notified if your PC needs cleaning.'); }
+  else showToast('warn','Permission Denied','Enable notifications in your browser settings.');
+}
+function sendBrowserNotif(dust) {
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  if (Date.now() - lastNotifTime < NOTIF_COOLDOWN) return;
+  lastNotifTime = Date.now();
+  new Notification('🚨 Your PC Needs Cleaning!', {
+    body: 'Dust is too high (' + dust.toFixed(4) + ' mg/m³).\nTurn off your PC and clean the vents.',
+    tag: 'dust-alert', requireInteraction: true
+  });
+}
+function showAlertBanner() {
+  if (bannerDismissed) return;
+  const b = document.getElementById('alert-banner');
+  b.style.display = 'block';
+  document.querySelector('header').style.marginTop = b.offsetHeight + 'px';
+}
+function dismissBanner() {
+  const b = document.getElementById('alert-banner');
+  b.style.transition = 'opacity 0.3s, transform 0.3s';
+  b.style.opacity = '0'; b.style.transform = 'translateY(-100%)';
+  setTimeout(() => { b.style.display='none'; b.style.opacity=''; b.style.transform=''; document.querySelector('header').style.marginTop=''; }, 300);
+  bannerDismissed = true;
+  setTimeout(() => { bannerDismissed = false; }, 10 * 60 * 1000);
+}
+function hideBanner() { if (document.getElementById('alert-banner').style.display === 'none') return; dismissBanner(); }
+
+function showToast(type, title, msg) {
+  const c = document.getElementById('toast-container');
+  const t = document.createElement('div');
+  t.className = 'toast' + (type === 'high' ? ' t-high' : type === 'warn' ? ' t-warn' : '');
+  t.innerHTML = `<div class="toast-title">${title}</div><div class="toast-msg">${msg}</div>`;
+  c.appendChild(t);
+  const rm = () => { t.classList.add('toast-out'); setTimeout(() => t.remove(), 300); };
+  t.addEventListener('click', rm);
+  setTimeout(rm, type === 'high' ? 8000 : 4000);
+}
+
+function handleAlert(label, dust) {
+  if (label === 'High Dust') {
+    consecutiveHigh++;
+    showAlertBanner();
+    if (consecutiveHigh === 1) showToast('high','🚨 Your PC Needs Cleaning!','Dust is too high. Scroll down to see what to do.');
+    sendBrowserNotif(dust);
+  } else {
+    consecutiveHigh = 0;
+    if (label !== 'Collecting data...') hideBanner();
+  }
+}
+
+/* ── FIREBASE ─────────────────────────────── */
+let lastTimestamp = null;
+
+async function fetchLatest() {
+  try {
+    const res = await fetch(`${FB_URL}/sensor_data/latest.json?auth=${FB_AUTH}`);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    if (!data || data.timestamp === lastTimestamp) return;
+    lastTimestamp = data.timestamp;
+
+    const dust = parseFloat(data.dust_density);
+    const temp = parseFloat(data.temperature);
+    const hum  = parseFloat(data.humidity);
+    if (isNaN(dust) || isNaN(temp) || isNaN(hum)) return;
+
+    setVal('v-dust', dust.toFixed(4));
+    setVal('v-temp', temp.toFixed(1));
+    setVal('v-hum',  hum.toFixed(1));
+    document.getElementById('last-update').textContent = 'Updated ' + new Date().toLocaleTimeString('en-PH', { hour12: true });
+
+    const label = await mlPredict(dust, temp);
+    setHero(labelToState(label));
+    handleAlert(label, dust);
+
+    const tl = new Date().toLocaleTimeString('en-PH', { hour12: true, hour: '2-digit', minute: '2-digit' });
+    addToCharts(tl, dust, temp, hum);
+    addToTable(tl, dust, temp, hum, label);
+    setFBStatus(true);
+  } catch (e) { setFBStatus(false); setHero('offline'); console.error(e); }
+}
+
+async function seedHistory() {
+  try {
+    const res = await fetch(`${FB_URL}/sensor_data.json?orderBy="$key"&limitToLast=25&auth=${FB_AUTH}`);
+    if (!res.ok) return;
+    const raw = await res.json();
+    if (!raw) return;
+
+    const entries = Object.entries(raw).filter(([k]) => k !== 'latest').sort(([a],[b]) => a.localeCompare(b));
+    entries.forEach(([, d]) => {
+      const dv = parseFloat(d.dust_density), tv = parseFloat(d.temperature), hv = parseFloat(d.humidity);
+      if (isNaN(dv)) return;
+      updateBuffers(dv, tv);
+      addToCharts(new Date().toLocaleTimeString('en-PH',{hour12:true,hour:'2-digit',minute:'2-digit'}), dv, tv, hv);
+    });
+
+    if (entries.length > 0) {
+      const last = entries[entries.length-1][1];
+      const dv = parseFloat(last.dust_density), tv = parseFloat(last.temperature), hv = parseFloat(last.humidity);
+      if (!isNaN(dv)) {
+        setVal('v-dust', dv.toFixed(4)); setVal('v-temp', tv.toFixed(1)); setVal('v-hum', hv.toFixed(1));
+        entries.slice(-15).forEach(([,d]) => {
+          const ddv=parseFloat(d.dust_density),ttv=parseFloat(d.temperature),hhv=parseFloat(d.humidity);
+          if (!isNaN(ddv)) addToTable(new Date().toLocaleTimeString('en-PH',{hour12:true,hour:'2-digit',minute:'2-digit'}), ddv, ttv, hhv, 'Collecting data...');
+        });
+        mlPredict(dv, tv).then(label => { setHero(labelToState(label)); handleAlert(label, dv); });
+      }
+    }
+    setFBStatus(true);
+  } catch (e) { console.warn('Seed failed:', e); }
+}
+
+/* ── BACKEND HEALTH ───────────────────────── */
+async function checkBackend() {
+  try {
+    const res = await fetch(`${BACKEND_URL}/health`, { signal: AbortSignal.timeout(4000) });
+    if (res.ok) { document.getElementById('api-dot').className='conn-dot live'; document.getElementById('api-label').textContent='AI Live'; }
+    else throw new Error();
+  } catch {
+    document.getElementById('api-dot').className='conn-dot error';
+    document.getElementById('api-label').textContent='AI Offline';
+  }
+}
+
+/* ── INIT ─────────────────────────────────── */
+initNotifButton();
+checkBackend();
+setInterval(checkBackend, 30000);
+seedHistory().then(() => { fetchLatest(); setInterval(fetchLatest, 5000); });
+</script>
+</body>
+</html>

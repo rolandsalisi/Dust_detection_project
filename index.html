@@ -371,7 +371,7 @@ function labelToState(l) {
 
 function labelToPill(l) {
   const m = LABEL_MAP[l];
-  if (!m) return '<span class="pill p-wait">Checking&#8230;</span>';
+  if (!m) return '<span class="pill p-wait">—</span>';
   return '<span class="pill ' + m.pillCls + '">' + m.statusText + '</span>';
 }
 
@@ -388,9 +388,44 @@ function setVal(id, val) {
   void el.offsetWidth;
   el.classList.add('flash');
 }
-function setFBStatus(ok) {
-  document.getElementById('conn-dot').className = 'conn-dot ' + (ok ? 'live' : 'error');
-  document.getElementById('conn-label').textContent = ok ? 'Sensor Live' : 'Sensor Offline';
+function clearLiveValues() {
+  document.getElementById('v-dust').textContent = '—';
+  document.getElementById('v-temp').textContent = '—';
+}
+function clearLastUpdate() {
+  document.getElementById('last-update').textContent = '';
+}
+function parseReadingTimestamp(ts) {
+  if (ts === null || ts === undefined) return null;
+  if (typeof ts === 'number') return ts > 1e12 ? ts : ts > 1e9 ? ts * 1000 : null;
+  if (typeof ts === 'string') {
+    const n = Number(ts);
+    if (!Number.isNaN(n) && ts.trim() !== '') return parseReadingTimestamp(n);
+    const parsed = Date.parse(ts);
+    return Number.isNaN(parsed) ? null : parsed;
+  }
+  return null;
+}
+function formatReadingTime(ts) {
+  const parsed = parseReadingTimestamp(ts);
+  if (parsed === null) return new Date().toLocaleTimeString('en-PH',{hour12:true,hour:'2-digit',minute:'2-digit'});
+  return new Date(parsed).toLocaleTimeString('en-PH',{hour12:true,hour:'2-digit',minute:'2-digit'});
+}
+function setFBStatus(state) {
+  const dot = document.getElementById('conn-dot');
+  const label = document.getElementById('conn-label');
+  if (state === 'live') {
+    dot.className = 'conn-dot live';
+    label.textContent = 'Sensor Live';
+    return;
+  }
+  if (state === 'offline') {
+    dot.className = 'conn-dot error';
+    label.textContent = 'Sensor Offline';
+    return;
+  }
+  dot.className = 'conn-dot';
+  label.textContent = 'Checking...';
 }
 
 /* ── CHARTS ───────────────────────────────── */
@@ -415,7 +450,7 @@ const tempChart = new Chart(document.getElementById('tempChart'), {
   options:{...chartBase,plugins:{...chartBase.plugins,tooltip:{...chartBase.plugins.tooltip,callbacks:{label:c=>' Temp: '+c.parsed.y.toFixed(1)+'°C'}}},scales:{...chartBase.scales,y:{...chartBase.scales.y,title:{display:true,text:'°C',color:'#94a3b8',font:{size:10}}}}}
 });
 
-const MAX_CHART = 30, histRows = [];
+const MAX_CHART = 30, HIST_LIMIT = 15, HISTORY_STORAGE_KEY = 'dust_recent_readings_v1', histRows = [];
 
 function addToCharts(lbl, dust, temp) {
   [dustChart, tempChart].forEach(c => {
@@ -430,12 +465,41 @@ function addToCharts(lbl, dust, temp) {
   document.getElementById('reading-count').textContent = dustChart.data.labels.length + ' readings';
 }
 
-function addToTable(time, dust, temp, label) {
-  histRows.unshift({time,dust,temp,label});
-  if (histRows.length > 15) histRows.pop();
-  document.getElementById('hist-tbody').innerHTML = histRows.map(r =>
+function renderHistoryTable() {
+  const tbody = document.getElementById('hist-tbody');
+  if (!histRows.length) {
+    tbody.innerHTML = '<tr><td colspan="5" style="color:var(--text-light);text-align:center;padding:28px 14px">Waiting for first reading&#8230;</td></tr>';
+    return;
+  }
+  tbody.innerHTML = histRows.map(r =>
     '<tr><td>'+r.time+'</td><td>'+r.dust.toFixed(4)+' <small style="color:var(--text-light)">mg/m³</small></td><td>'+r.temp.toFixed(1)+' °C</td><td>'+labelToPill(r.label)+'</td><td>'+labelToRec(r.label)+'</td></tr>'
   ).join('');
+}
+function saveHistoryTable() {
+  try { localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(histRows)); } catch {}
+}
+function loadHistoryTable() {
+  try {
+    const raw = localStorage.getItem(HISTORY_STORAGE_KEY);
+    if (!raw) return false;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed) || !parsed.length) return false;
+    histRows.splice(0, histRows.length, ...parsed.filter(r =>
+      r && typeof r.time === 'string' && Number.isFinite(r.dust) && Number.isFinite(r.temp)
+    ).slice(0, HIST_LIMIT));
+    renderHistoryTable();
+    return histRows.length > 0;
+  } catch {
+    return false;
+  }
+}
+function addToTable(time, dust, temp, label) {
+  const newest = histRows[0];
+  if (newest && newest.time === time && newest.dust === dust && newest.temp === temp && newest.label === label) return;
+  histRows.unshift({time,dust,temp,label});
+  if (histRows.length > HIST_LIMIT) histRows.pop();
+  renderHistoryTable();
+  saveHistoryTable();
 }
 
 /* ── NOTIFICATIONS ────────────────────────── */
@@ -503,7 +567,7 @@ async function checkBackend(){
 
 /* ── FIREBASE LIVE ────────────────────────── */
 let lastTimestamp=null,lastNewDataTime=null;
-const STALE_TIMEOUT=30*1000;
+const STALE_TIMEOUT=15*1000;
 
 async function fetchLatest() {
   try {
@@ -512,22 +576,35 @@ async function fetchLatest() {
     const data=await res.json();
     if(!data){markStaleIfNeeded();return;}
     if(data.timestamp===lastTimestamp){markStaleIfNeeded();return;}
+    const readingTime=parseReadingTimestamp(data.timestamp);
+    const isFresh=readingTime!==null&&Date.now()-readingTime<=STALE_TIMEOUT;
+    if(!isFresh){
+      lastTimestamp=data.timestamp;
+      setFBStatus('offline');
+      clearLiveValues();
+      clearLastUpdate();
+      setHero('offline');
+      return;
+    }
     lastTimestamp=data.timestamp;
-    lastNewDataTime=Date.now();
+    lastNewDataTime=readingTime??Date.now();
     const dust=parseFloat(data.dust_density),temp=parseFloat(data.temperature);
     if(isNaN(dust)||isNaN(temp))return;
     setVal('v-dust',dust.toFixed(4));setVal('v-temp',temp.toFixed(1));
-    document.getElementById('last-update').textContent='Updated '+new Date().toLocaleTimeString('en-PH',{hour12:true});
+    document.getElementById('last-update').textContent='Updated '+new Date(lastNewDataTime).toLocaleTimeString('en-PH',{hour12:true});
     const label=await mlPredict(dust,temp);
     setHero(labelToState(label));handleAlert(label,dust);
-    const tl=new Date().toLocaleTimeString('en-PH',{hour12:true,hour:'2-digit',minute:'2-digit'});
+    const tl=formatReadingTime(data.timestamp);
     addToCharts(tl,dust,temp);addToTable(tl,dust,temp,label);
-    setFBStatus(true);
-  } catch(e){setFBStatus(false);setHero('offline');console.error(e);}
+    setFBStatus('live');
+  } catch(e){setFBStatus('offline');clearLiveValues();clearLastUpdate();setHero('offline');console.error(e);}
 }
 function markStaleIfNeeded(){
   if(!lastNewDataTime||Date.now()-lastNewDataTime>STALE_TIMEOUT){
-    setFBStatus(false);if(!lastNewDataTime)setHero('offline');
+    setFBStatus(lastNewDataTime ? 'offline' : 'checking');
+    clearLiveValues();
+    clearLastUpdate();
+    setHero('offline');
   }
 }
 async function seedHistory(){
@@ -538,19 +615,12 @@ async function seedHistory(){
     entries.forEach(([,d])=>{
       const dv=parseFloat(d.dust_density),tv=parseFloat(d.temperature);
       if(isNaN(dv))return;updateBuffers(dv,tv);
-      addToCharts(new Date().toLocaleTimeString('en-PH',{hour12:true,hour:'2-digit',minute:'2-digit'}),dv,tv);
+      addToCharts(formatReadingTime(d.timestamp),dv,tv);
     });
     if(entries.length>0){
       const last=entries[entries.length-1][1];
-      const dv=parseFloat(last.dust_density),tv=parseFloat(last.temperature);
-      if(!isNaN(dv)){
-        setVal('v-dust',dv.toFixed(4));setVal('v-temp',tv.toFixed(1));
-        entries.slice(-15).forEach(([,d])=>{
-          const ddv=parseFloat(d.dust_density),ttv=parseFloat(d.temperature);
-          if(!isNaN(ddv))addToTable(new Date().toLocaleTimeString('en-PH',{hour12:true,hour:'2-digit',minute:'2-digit'}),ddv,ttv,'Collecting data...');
-        });
-        mlPredict(dv,tv).then(label=>{setHero(labelToState(label));handleAlert(label,dv);});
-      }
+      lastTimestamp = last.timestamp ?? null;
+      lastNewDataTime = parseReadingTimestamp(last.timestamp);
     }
   }catch(e){console.warn('Seed failed:',e);}
 }
@@ -558,6 +628,8 @@ async function seedHistory(){
 
 /* ── INIT ─────────────────────────────────── */
 initNotifButton();
+loadHistoryTable();
+setFBStatus('checking');
 checkBackend();
 setInterval(checkBackend,30000);
 seedHistory().then(()=>{fetchLatest();setInterval(fetchLatest,5000);});

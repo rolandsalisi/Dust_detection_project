@@ -450,7 +450,10 @@ const tempChart = new Chart(document.getElementById('tempChart'), {
   options:{...chartBase,plugins:{...chartBase.plugins,tooltip:{...chartBase.plugins.tooltip,callbacks:{label:c=>' Temp: '+c.parsed.y.toFixed(1)+'°C'}}},scales:{...chartBase.scales,y:{...chartBase.scales.y,title:{display:true,text:'°C',color:'#94a3b8',font:{size:10}}}}}
 });
 
-const MAX_CHART = 30, HIST_LIMIT = 15, HISTORY_STORAGE_KEY = 'dust_recent_readings_v1', histRows = [];
+const MAX_CHART = 30, HIST_LIMIT = 15;
+const HISTORY_STORAGE_KEY = 'dust_recent_readings_v1';
+const CHART_STORAGE_KEY = 'dust_chart_data_v1';
+const histRows = [];
 
 function addToCharts(lbl, dust, temp) {
   [dustChart, tempChart].forEach(c => {
@@ -463,6 +466,28 @@ function addToCharts(lbl, dust, temp) {
   if (tempChart.data.datasets[0].data.length > MAX_CHART) tempChart.data.datasets[0].data.shift();
   dustChart.update('none'); tempChart.update('none');
   document.getElementById('reading-count').textContent = dustChart.data.labels.length + ' readings';
+  saveChartData();
+}
+function saveChartData() {
+  try {
+    const d = { labels: dustChart.data.labels, dust: dustChart.data.datasets[0].data, temp: tempChart.data.datasets[0].data };
+    localStorage.setItem(CHART_STORAGE_KEY, JSON.stringify(d));
+  } catch {}
+}
+function loadChartData() {
+  try {
+    const raw = localStorage.getItem(CHART_STORAGE_KEY);
+    if (!raw) return false;
+    const d = JSON.parse(raw);
+    if (!d || !Array.isArray(d.labels) || !d.labels.length) return false;
+    dustChart.data.labels = d.labels.slice(-MAX_CHART);
+    tempChart.data.labels = d.labels.slice(-MAX_CHART);
+    dustChart.data.datasets[0].data = d.dust.slice(-MAX_CHART);
+    tempChart.data.datasets[0].data = d.temp.slice(-MAX_CHART);
+    dustChart.update('none'); tempChart.update('none');
+    document.getElementById('reading-count').textContent = dustChart.data.labels.length + ' readings';
+    return true;
+  } catch { return false; }
 }
 
 function renderHistoryTable() {
@@ -569,6 +594,10 @@ async function checkBackend(){
 let lastTimestamp=null,lastNewDataTime=null;
 const STALE_TIMEOUT=15*1000;
 
+function nowLabel(){
+  return new Date().toLocaleTimeString('en-PH',{hour12:true,hour:'2-digit',minute:'2-digit',second:'2-digit'});
+}
+
 async function fetchLatest() {
   try {
     const res=await fetch(FB_URL+'/sensor_data/latest.json?auth='+FB_AUTH);
@@ -576,25 +605,15 @@ async function fetchLatest() {
     const data=await res.json();
     if(!data){markStaleIfNeeded();return;}
     if(data.timestamp===lastTimestamp){markStaleIfNeeded();return;}
-    const readingTime=parseReadingTimestamp(data.timestamp);
-    const isFresh=readingTime!==null&&Date.now()-readingTime<=STALE_TIMEOUT;
-    if(!isFresh){
-      lastTimestamp=data.timestamp;
-      setFBStatus('offline');
-      clearLiveValues();
-      clearLastUpdate();
-      setHero('offline');
-      return;
-    }
     lastTimestamp=data.timestamp;
-    lastNewDataTime=readingTime??Date.now();
+    lastNewDataTime=Date.now();
     const dust=parseFloat(data.dust_density),temp=parseFloat(data.temperature);
     if(isNaN(dust)||isNaN(temp))return;
     setVal('v-dust',dust.toFixed(4));setVal('v-temp',temp.toFixed(1));
-    document.getElementById('last-update').textContent='Updated '+new Date(lastNewDataTime).toLocaleTimeString('en-PH',{hour12:true});
+    document.getElementById('last-update').textContent='Updated '+nowLabel();
     const label=await mlPredict(dust,temp);
     setHero(labelToState(label));handleAlert(label,dust);
-    const tl=formatReadingTime(data.timestamp);
+    const tl=nowLabel();
     addToCharts(tl,dust,temp);addToTable(tl,dust,temp,label);
     setFBStatus('live');
   } catch(e){setFBStatus('offline');clearLiveValues();clearLastUpdate();setHero('offline');console.error(e);}
@@ -612,15 +631,21 @@ async function seedHistory(){
     const res=await fetch(FB_URL+'/sensor_data.json?orderBy="$key"&limitToLast=25&auth='+FB_AUTH);
     if(!res.ok)return;const raw=await res.json();if(!raw)return;
     const entries=Object.entries(raw).filter(([k])=>k!=='latest').sort(([a],[b])=>a.localeCompare(b));
-    entries.forEach(([,d])=>{
+    const total=entries.length;
+    const now=Date.now();
+    entries.forEach(([,d],i)=>{
       const dv=parseFloat(d.dust_density),tv=parseFloat(d.temperature);
       if(isNaN(dv))return;updateBuffers(dv,tv);
-      addToCharts(formatReadingTime(d.timestamp),dv,tv);
+      if(!hadSavedCharts){
+        const estimatedTime=new Date(now-(total-1-i)*5000);
+        const lbl=estimatedTime.toLocaleTimeString('en-PH',{hour12:true,hour:'2-digit',minute:'2-digit',second:'2-digit'});
+        addToCharts(lbl,dv,tv);
+      }
     });
-    if(entries.length>0){
-      const last=entries[entries.length-1][1];
-      lastTimestamp = last.timestamp ?? null;
-      lastNewDataTime = parseReadingTimestamp(last.timestamp);
+    if(raw.latest){
+      lastTimestamp=raw.latest.timestamp??null;
+    } else if(entries.length>0){
+      lastTimestamp=entries[entries.length-1][1].timestamp??null;
     }
   }catch(e){console.warn('Seed failed:',e);}
 }
@@ -629,6 +654,7 @@ async function seedHistory(){
 /* ── INIT ─────────────────────────────────── */
 initNotifButton();
 loadHistoryTable();
+const hadSavedCharts = loadChartData();
 setFBStatus('checking');
 checkBackend();
 setInterval(checkBackend,30000);
